@@ -56,6 +56,7 @@
 
     <main id="main-content" class="flex-grow w-[90%] mx-auto space-y-8">
 
+
         <!-- 系統名稱與 LOGO 置中區塊 -->
         <div class="flex flex-row items-center justify-center pt-6 gap-3">
             <div class="bg-blue-600 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center" style="width:36px;height:36px;">
@@ -98,9 +99,9 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                             常用設定
                         </button>
-                        <button onclick="openCloudModal()" class="btn-action bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-xl border border-slate-200 h-[58px] whitespace-nowrap shadow-sm">
+                        <button id="cloudBtn" onclick="handleCloudBtn()" class="btn-action bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-xl border border-slate-200 h-[58px] whitespace-nowrap shadow-sm">
                             <span id="cloudStatusDot" class="cloud-dot disconnected"></span>
-                            雲端設定
+                            <span id="cloudBtnText">未登入</span>
                         </button>
                     </div>
                 </div>
@@ -209,30 +210,6 @@
         </div>
     </div>
 
-    <!-- 雲端設定 Modal（5-2 三段式，一般操作主題色 #1D4ED8） -->
-    <div id="cloudModal" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/50 backdrop-blur-sm hidden">
-        <div class="bg-white animate-fade-in overflow-hidden rounded-lg shadow-xl mx-auto flex flex-col" style="width:50vw;max-height:90vh;">
-            <div class="flex items-center justify-between px-3 py-3 flex-shrink-0" style="background-color:#1D4ED8;">
-                <h3 class="text-2xl font-bold text-white flex items-center gap-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-                    Firestore 雲端設定
-                </h3>
-                <button onclick="closeCloudModal()" class="text-xl text-white hover:opacity-70">✕</button>
-            </div>
-            <div class="p-3 overflow-y-auto flex-grow space-y-4">
-
-                <!-- 操作說明 -->
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2 text-xl text-slate-600">
-                    <p class="font-bold text-blue-700">如何取得 Firebase 設定？</p>
-                    <ol class="list-decimal list-inside space-y-1 text-slate-500">
-                        <li>前往 <a href="https://console.firebase.google.com" target="_blank" class="text-blue-600 underline">console.firebase.google.com</a> 建立或選擇專案</li>
-                        <li>點選「新增應用程式」→ 選擇「Web（&lt;/&gt;）」圖示</li>
-                        <li>複製 <code class="bg-blue-100 px-1 rounded">firebaseConfig</code> 內的各項值填入下方</li>
-                        <li>前往「建構」→「Firestore Database」→ 建立資料庫</li>
-                        <li>在「規則」頁籤，測試階段可暫設：<code class="bg-blue-100 px-1 rounded">allow read, write: if true;</code></li>
-                    </ol>
-                </div>
-
                 <!-- Firebase 設定輸入 -->
                 <div class="space-y-3">
                     <p class="font-bold text-slate-700">Firebase 專案設定</p>
@@ -253,6 +230,10 @@
                             <label class="input-group-label">App ID</label>
                             <input type="text" id="fbAppId" placeholder="1:123456:web:abc123" class="input-light w-full">
                         </div>
+                    </div>
+                    <div>
+                        <label class="input-group-label text-rose-600">授權 Google 帳號（僅此帳號可登入使用雲端）</label>
+                        <input type="email" id="fbAllowedEmail" placeholder="your@gmail.com" class="input-light w-full border-rose-200 focus:border-rose-500">
                     </div>
                 </div>
 
@@ -283,13 +264,27 @@
     </div>
 
     <script type="module">
-        // ─── Firebase SDK（ESM 模組，動態 import）─────────────────────────────
-        // 版本鎖定，確保相容性
-        const FB_VER = '10.12.2';
-        const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
-
+        // ─── 常數 ───────────────────────────────────────────────────────────────
         // 版權宣告年份常數，建立時確認，請勿隨意修改
         const FOUNDED_YEAR = 2026;
+
+        // Vercel API 端點（後台，Firebase config 完全不在前端）
+        const API_AUTH    = '/api/auth';
+        const API_PRESETS = '/api/presets';
+        const API_SAVE    = '/api/save';
+
+        // Firebase Auth SDK（僅用於 Google 登入，不含 Firestore）
+        const FB_VER  = '10.12.2';
+        const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
+
+        // Firebase 前端設定（僅供 Google 登入用，不含任何 Firestore 存取權）
+        // Firestore 讀寫完全由 Vercel 後台處理
+        const FB_CLIENT_CONFIG = {
+            apiKey:    'AIzaSyDb6CaltfgGLApZHSEwpH6HXctcIYlKhR0',
+            authDomain:'image-cropper-tool.firebaseapp.com',
+            projectId: 'image-cropper-tool',
+            appId:     '1:559607381985:web:120628651f644fffcc1ca0'
+        };
 
         // 雲端連線狀態常數
         const CLOUD_STATUS = {
@@ -305,11 +300,13 @@
             startY: 0,
             startMidY: 0,
             midGapY: 0,
-            // localStorage 作為離線備援，Firestore 連線後同步覆蓋
+            // localStorage 作為離線備援
             presets: JSON.parse(localStorage.getItem('crop_presets_v3.4') || '[]'),
             currentConfirmAction: null,
-            db: null,
-            fsConfig: null,
+            auth: null,
+            authProvider: null,
+            currentUser: null,
+            idToken: null,
             cloudStatus: CLOUD_STATUS.DISCONNECTED
         };
 
@@ -339,38 +336,27 @@
             confirmActionBtn: document.getElementById('confirmActionBtn'),
             sitFooter:     document.getElementById('site-footer'),
             mainContent:   document.getElementById('main-content'),
-            // 雲端設定相關
-            cloudModal:       document.getElementById('cloudModal'),
             cloudStatusDot:   document.getElementById('cloudStatusDot'),
-            fbApiKey:         document.getElementById('fbApiKey'),
-            fbProjectId:      document.getElementById('fbProjectId'),
-            fbAuthDomain:     document.getElementById('fbAuthDomain'),
-            fbAppId:          document.getElementById('fbAppId'),
-            fbCollection:     document.getElementById('fbCollection'),
-            fbDocument:       document.getElementById('fbDocument'),
-            fbPathPreview:    document.getElementById('fbPathPreview'),
-            cloudConnectStatus: document.getElementById('cloudConnectStatus'),
+            cloudBtnText:     document.getElementById('cloudBtnText'),
             presetCloudStatus:  document.getElementById('presetCloudStatus'),
             presetCloudDot:     document.getElementById('presetCloudDot'),
             presetCloudText:    document.getElementById('presetCloudText')
         };
 
         // window 掛載，讓 HTML inline onclick 可以呼叫
-        window.openPresetModal    = openPresetModal;
-        window.closePresetModal   = closePresetModal;
+        window.openPresetModal     = openPresetModal;
+        window.closePresetModal    = closePresetModal;
         window.saveCurrentAsPreset = saveCurrentAsPreset;
-        window.applyPreset        = applyPreset;
+        window.applyPreset         = applyPreset;
         window.requestDeletePreset = requestDeletePreset;
-        window.openCloudModal     = openCloudModal;
-        window.closeCloudModal    = closeCloudModal;
-        window.saveCloudConfig    = saveCloudConfig;
-        window.updatePathPreview  = updatePathPreview;
-        window.triggerFileInput   = triggerFileInput;
-        window.updateParams       = updateParams;
-        window.requestRemoveImage = requestRemoveImage;
-        window.downloadResult     = downloadResult;
-        window.closeConfirmModal  = closeConfirmModal;
-        window.handleFile         = handleFile;
+        window.handleCloudBtn      = handleCloudBtn;
+        window.triggerFileInput    = triggerFileInput;
+        window.updateParams        = updateParams;
+        window.requestRemoveImage  = requestRemoveImage;
+        window.downloadResult      = downloadResult;
+        window.closeConfirmModal   = closeConfirmModal;
+        window.handleFile          = handleFile;
+        window.signOut             = signOut;
 
         const mainCtx = els.mainCanvas.getContext('2d');
 
@@ -392,130 +378,122 @@
             els.presetCloudStatus.classList.toggle('flex',    show);
         }
 
-        // ─── 雲端設定 Modal ─────────────────────────────────────────────────────
-        function openCloudModal() {
-            const saved = JSON.parse(localStorage.getItem('fb_config') || '{}');
-            els.fbApiKey.value     = saved.apiKey     || '';
-            els.fbProjectId.value  = saved.projectId  || '';
-            els.fbAuthDomain.value = saved.authDomain  || '';
-            els.fbAppId.value      = saved.appId       || '';
-            els.fbCollection.value = saved.collection  || '';
-            els.fbDocument.value   = saved.document    || '';
-            updatePathPreview();
-            els.cloudConnectStatus.classList.add('hidden');
-            els.cloudModal.classList.remove('hidden');
+        // ─── 雲端設定按鈕：未登入時觸發登入，已登入時顯示帳號資訊 ─────────────
+        async function handleCloudBtn() {
+            if (state.currentUser) return; // 已登入時按鈕不做動作（可擴充為登出）
+            if (!state.auth) await initAuth();
+            if (window.doSignIn) window.doSignIn();
         }
 
-        function closeCloudModal() {
-            els.cloudModal.classList.add('hidden');
-        }
-
-        // 即時更新 Firestore 路徑預覽
-        function updatePathPreview() {
-            const col = els.fbCollection.value.trim() || '（Collection）';
-            const doc = els.fbDocument.value.trim()   || '（Document）';
-            els.fbPathPreview.innerText = `${col} / ${doc}`;
-        }
-
-        // 顯示 Modal 內的連線狀態回饋
-        function showConnectStatus(status, message) {
-            const map = {
-                [CLOUD_STATUS.CONNECTED]: 'border-green-200 bg-green-50 text-green-700',
-                [CLOUD_STATUS.ERROR]:     'border-red-200   bg-red-50   text-red-700',
-                [CLOUD_STATUS.SYNCING]:   'border-blue-200  bg-blue-50  text-blue-700'
-            };
-            const cls = map[status] || 'border-slate-200 bg-slate-50 text-slate-600';
-            els.cloudConnectStatus.className = `flex items-center gap-2 px-3 py-2 rounded-lg border text-xl ${cls}`;
-            els.cloudConnectStatus.innerHTML =
-                `<span class="cloud-dot ${status}"></span><span>${message}</span>`;
-            els.cloudConnectStatus.classList.remove('hidden');
-        }
-
-        // 儲存設定並初始化 Firestore 連線
-        async function saveCloudConfig() {
-            const config = {
-                apiKey:     els.fbApiKey.value.trim(),
-                projectId:  els.fbProjectId.value.trim(),
-                authDomain: els.fbAuthDomain.value.trim(),
-                appId:      els.fbAppId.value.trim(),
-                collection: els.fbCollection.value.trim(),
-                document:   els.fbDocument.value.trim()
-            };
-            if (!config.apiKey || !config.projectId || !config.collection || !config.document) {
-                showConnectStatus(CLOUD_STATUS.ERROR, '請填寫 API Key、Project ID、Collection 及 Document 名稱');
-                return;
-            }
-            showConnectStatus(CLOUD_STATUS.SYNCING, '連線中……');
-            localStorage.setItem('fb_config', JSON.stringify(config));
-            try {
-                await initFirestore(config);
-                showConnectStatus(CLOUD_STATUS.CONNECTED, '連線成功！預設資料已從 Firestore 同步');
-            } catch (err) {
-                showConnectStatus(CLOUD_STATUS.ERROR, `連線失敗：${err.message}`);
-                setCloudStatus(CLOUD_STATUS.ERROR, '連線失敗');
-            }
-        }
-
-        // 動態載入 Firebase SDK 並初始化 Firestore
-        async function initFirestore(config) {
+        // ─── Firebase Auth 初始化（僅用於 Google 登入）────────────────────────
+        async function initAuth() {
             const { initializeApp, getApps, getApp } = await import(`${FB_BASE}/firebase-app.js`);
-            const { getFirestore }                    = await import(`${FB_BASE}/firebase-firestore.js`);
+            const { getAuth, GoogleAuthProvider, signInWithPopup,
+                    onAuthStateChanged, signOut: fbSignOut } = await import(`${FB_BASE}/firebase-auth.js`);
 
-            // 避免重複初始化 Firebase App
-            const app = getApps().length ? getApp() : initializeApp({
-                apiKey:     config.apiKey,
-                authDomain: config.authDomain,
-                projectId:  config.projectId,
-                appId:      config.appId
+            const app = getApps().length ? getApp() : initializeApp(FB_CLIENT_CONFIG);
+            state.auth         = getAuth(app);
+            state.authProvider = new GoogleAuthProvider();
+
+            // 監聽登入狀態
+            onAuthStateChanged(state.auth, async (user) => {
+                if (user) {
+                    setCloudStatus(CLOUD_STATUS.SYNCING, '驗證中……');
+                    try {
+                        // 取得 ID token 傳給後台驗證
+                        state.idToken = await user.getIdToken();
+                        const res  = await fetch(API_AUTH, {
+                            method:  'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body:    JSON.stringify({ idToken: state.idToken })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) {
+                            // 非授權帳號，立即登出
+                            await fbSignOut(state.auth);
+                            setCloudStatus(CLOUD_STATUS.ERROR, data.error || '無存取權限');
+                            els.cloudBtnText.innerText = '未登入';
+                            return;
+                        }
+                        // 驗證通過
+                        state.currentUser = user;
+                        els.cloudBtnText.innerText = user.email;
+                        await loadPresetsFromAPI();
+                    } catch (err) {
+                        setCloudStatus(CLOUD_STATUS.ERROR, `驗證失敗：${err.message}`);
+                        els.cloudBtnText.innerText = '未登入';
+                    }
+                } else {
+                    state.currentUser = null;
+                    state.idToken     = null;
+                    els.cloudBtnText.innerText = '未登入';
+                    state.presets = JSON.parse(localStorage.getItem('crop_presets_v3.4') || '[]');
+                    setCloudStatus(CLOUD_STATUS.DISCONNECTED, '');
+                }
             });
-            state.db       = getFirestore(app);
-            state.fsConfig = config;
-            await loadPresetsFromFirestore();
+
+            // 觸發 Google 登入彈窗
+            async function doSignIn() {
+                try {
+                    await signInWithPopup(state.auth, state.authProvider);
+                } catch (err) {
+                    if (err.code !== 'auth/popup-closed-by-user') {
+                        setCloudStatus(CLOUD_STATUS.ERROR, `登入失敗：${err.message}`);
+                    }
+                }
+            }
+            window.doSignIn = doSignIn;
+
+            // 登出
+            window.signOut = async () => {
+                await fbSignOut(state.auth);
+                state.db = null;
+            };
         }
 
-        // 從 Firestore 讀取預設清單
-        async function loadPresetsFromFirestore() {
-            const { doc, getDoc } = await import(`${FB_BASE}/firebase-firestore.js`);
-            const cfg = state.fsConfig;
+        // ─── Vercel API：從後台讀取預設清單 ────────────────────────────────────
+        async function loadPresetsFromAPI() {
             setCloudStatus(CLOUD_STATUS.SYNCING, '同步中……');
             try {
-                const snap = await getDoc(doc(state.db, cfg.collection, cfg.document));
-                if (snap.exists()) {
-                    state.presets = snap.data().presets || [];
-                    localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
-                } else {
-                    // 文件不存在，將本地資料上傳至 Firestore
-                    await savePresetsToFirestore();
-                }
-                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${cfg.collection} / ${cfg.document}`);
+                const res  = await fetch(API_PRESETS, {
+                    headers: { 'Authorization': `Bearer ${state.idToken}` }
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                state.presets = data.presets;
+                localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
+                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${state.currentUser.email}`);
                 renderModalPresets();
             } catch (err) {
                 setCloudStatus(CLOUD_STATUS.ERROR, `讀取失敗：${err.message}`);
-                throw err;
             }
         }
 
-        // 將預設清單寫入 Firestore
-        async function savePresetsToFirestore() {
-            if (!state.db || !state.fsConfig) return;
-            const { doc, setDoc } = await import(`${FB_BASE}/firebase-firestore.js`);
-            const cfg = state.fsConfig;
+        // ─── Vercel API：將預設清單寫入後台 ────────────────────────────────────
+        async function savePresetsToAPI() {
+            if (!state.currentUser || !state.idToken) return;
             setCloudStatus(CLOUD_STATUS.SYNCING, '儲存中……');
             try {
-                await setDoc(doc(state.db, cfg.collection, cfg.document), { presets: state.presets });
-                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${cfg.collection} / ${cfg.document}`);
+                // 確保 token 未過期
+                state.idToken = await state.currentUser.getIdToken();
+                const res  = await fetch(API_SAVE, {
+                    method:  'POST',
+                    headers: {
+                        'Content-Type':  'application/json',
+                        'Authorization': `Bearer ${state.idToken}`
+                    },
+                    body: JSON.stringify({ presets: state.presets })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${state.currentUser.email}`);
             } catch (err) {
-                setCloudStatus(CLOUD_STATUS.ERROR, `寫入失敗：${err.message}`);
+                setCloudStatus(CLOUD_STATUS.ERROR, `儲存失敗：${err.message}`);
             }
         }
 
-        // 頁面載入時，若有已儲存的 Firebase 設定則自動重新連線
-        window.addEventListener('load', async () => {
-            const saved = JSON.parse(localStorage.getItem('fb_config') || '{}');
-            if (saved.apiKey && saved.projectId && saved.collection && saved.document) {
-                try { await initFirestore(saved); } catch (_) { /* 靜默降級使用 localStorage */ }
-            }
-        });
+        // 頁面載入時自動初始化 Auth
+        window.addEventListener('load', () => { initAuth().catch(() => {}); });
 
         // ─── 自訂確認視窗邏輯 ───────────────────────────────────────────────────
         function showConfirm({ title, message, onConfirm }) {
@@ -703,9 +681,9 @@
                 gapH:   els.midGapHeight.value,
                 midY:   state.midGapY
             });
-            // 同步寫入 localStorage（離線備援）與 Firestore（若已連線）
+            // 同步寫入 localStorage（離線備援）與後台 API（若已登入）
             localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
-            await savePresetsToFirestore();
+            await savePresetsToAPI();
             nameInput.value = '';
             renderModalPresets();
         }
@@ -750,9 +728,8 @@
 
         async function deletePreset(idx) {
             state.presets.splice(idx, 1);
-            // 同步寫入 localStorage（離線備援）與 Firestore（若已連線）
             localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
-            await savePresetsToFirestore();
+            await savePresetsToAPI();
             renderModalPresets();
         }
 
