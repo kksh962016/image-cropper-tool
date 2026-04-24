@@ -8,8 +8,11 @@ import { getFirestore } from 'firebase-admin/firestore';
 function initAdmin() {
     if (getApps().length) return;
     initializeApp({
-        credential: cert({ projectId: process.env.FIREBASE_PROJECT_ID }),
-        projectId:  process.env.FIREBASE_PROJECT_ID
+        credential: cert({
+            projectId:   process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey:  process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+        })
     });
 }
 
@@ -20,7 +23,6 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') return res.status(200).end();
     if (req.method !== 'GET') return res.status(405).json({ error: '僅支援 GET' });
 
-    // 從 Authorization header 取得 ID token
     const idToken = req.headers.authorization?.replace('Bearer ', '');
     if (!idToken) return res.status(401).json({ error: '缺少授權 token' });
 
