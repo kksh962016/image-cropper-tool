@@ -617,10 +617,10 @@
 
         function renderModalPresets() {
             els.modalList.innerHTML = state.presets.map((p, idx) => `
-                <div class="bg-slate-50 border border-slate-100 p-4 rounded-lg flex justify-between items-center hover:border-blue-300 transition-colors">
+                <div class="bg-slate-50 border border-slate-100 px-4 py-2 rounded-lg flex justify-between items-center hover:border-blue-300 transition-colors">
                     <div>
                         <div class="font-bold text-slate-700 text-xl">${p.name}</div>
-                        <div class="text-sm text-slate-400 font-mono mt-1">上方:${p.top} 下方:${p.bottom} 左側:${p.left} 右側:${p.right} | 中間高度:${p.gapH}</div>
+                        <div class="text-xl text-slate-400 font-mono mt-1">上方：${p.top}px 下方：${p.bottom}px 左側：${p.left}px 右側：${p.right}px 中間高度：${p.gapH}px</div>
                     </div>
                     <div class="flex gap-2">
                         <button onclick="applyPreset(${idx})" class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
