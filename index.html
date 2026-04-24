@@ -188,16 +188,11 @@
             <div class="flex items-center justify-between px-3 py-3 flex-shrink-0" style="background-color:#1D4ED8;">
                 <h3 class="text-2xl font-bold text-white flex items-center gap-3">
                     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                    常用裁剪預設
+                    常用裁剪設定
                 </h3>
                 <button onclick="closePresetModal()" class="text-xl text-white hover:opacity-70">✕</button>
             </div>
             <div class="p-3 overflow-y-auto flex-grow space-y-4">
-                <!-- 雲端同步狀態列（連線後顯示） -->
-                <div id="presetCloudStatus" class="hidden items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 text-xl text-slate-500">
-                    <span id="presetCloudDot" class="cloud-dot disconnected"></span>
-                    <span id="presetCloudText"></span>
-                </div>
                 <div class="flex gap-3">
                     <input type="text" id="newPresetName" placeholder="設定預設名稱..." class="input-light flex-grow">
                     <button onclick="saveCurrentAsPreset()" class="text-xl font-bold px-6 py-2 rounded text-white hover:opacity-90" style="background-color:#1D4ED8;">儲存</button>
@@ -275,10 +270,7 @@
             sitFooter:     document.getElementById('site-footer'),
             mainContent:   document.getElementById('main-content'),
             cloudStatusDot:   document.getElementById('cloudStatusDot'),
-            cloudBtnText:     document.getElementById('cloudBtnText'),
-            presetCloudStatus:  document.getElementById('presetCloudStatus'),
-            presetCloudDot:     document.getElementById('presetCloudDot'),
-            presetCloudText:    document.getElementById('presetCloudText')
+            cloudBtnText:     document.getElementById('cloudBtnText')
         };
 
         // window 掛載，讓 HTML inline onclick 可以呼叫
@@ -305,13 +297,8 @@
         window.addEventListener('resize', adjustMainPadding);
 
         // ─── 雲端狀態指示燈 ────────────────────────────────────────────────────
-        function setCloudStatus(status, message) {
+        function setCloudStatus(status) {
             els.cloudStatusDot.className = `cloud-dot ${status}`;
-            els.presetCloudDot.className = `cloud-dot ${status}`;
-            els.presetCloudText.innerText = message || '';
-            const show = status !== CLOUD_STATUS.DISCONNECTED;
-            els.presetCloudStatus.classList.toggle('hidden', !show);
-            els.presetCloudStatus.classList.toggle('flex',    show);
         }
 
         // ─── 雲端設定按鈕：未登入時觸發登入，已登入時登出 ─────────────────────
@@ -328,7 +315,7 @@
                     await signInWithPopup(state.auth, state.authProvider);
                 } catch (err) {
                     if (err.code !== 'auth/popup-closed-by-user') {
-                        setCloudStatus(CLOUD_STATUS.ERROR, `登入失敗：${err.message}`);
+                        setCloudStatus(CLOUD_STATUS.ERROR);
                     }
                 }
             }
@@ -353,7 +340,7 @@
             // 監聽登入狀態
             onAuthStateChanged(state.auth, async (user) => {
                 if (user) {
-                    setCloudStatus(CLOUD_STATUS.SYNCING, '驗證中……');
+                    setCloudStatus(CLOUD_STATUS.SYNCING);
                     try {
                         // 取得 ID token 傳給後台驗證
                         state.idToken = await user.getIdToken();
@@ -366,16 +353,16 @@
                         if (!res.ok) {
                             // 非授權帳號，立即登出
                             await fbSignOut(state.auth);
-                            setCloudStatus(CLOUD_STATUS.ERROR, data.error || '無存取權限');
+                            setCloudStatus(CLOUD_STATUS.ERROR);
                             els.cloudBtnText.innerText = '未登入';
                             return;
                         }
                         // 驗證通過，按鈕改顯示 email（點擊可登出）
                         state.currentUser = user;
-                        els.cloudBtnText.innerText = user.email;
+                        els.cloudBtnText.innerText = 'Firebase';
                         await loadPresetsFromAPI();
                     } catch (err) {
-                        setCloudStatus(CLOUD_STATUS.ERROR, `驗證失敗：${err.message}`);
+                        setCloudStatus(CLOUD_STATUS.ERROR);
                         els.cloudBtnText.innerText = '未登入';
                     }
                 } else {
@@ -383,7 +370,7 @@
                     state.idToken     = null;
                     els.cloudBtnText.innerText = '未登入';
                     state.presets = JSON.parse(localStorage.getItem('crop_presets_v3.4') || '[]');
-                    setCloudStatus(CLOUD_STATUS.DISCONNECTED, '');
+                    setCloudStatus(CLOUD_STATUS.DISCONNECTED);
                 }
             });
 
@@ -393,7 +380,7 @@
 
         // ─── Vercel API：從後台讀取預設清單 ────────────────────────────────────
         async function loadPresetsFromAPI() {
-            setCloudStatus(CLOUD_STATUS.SYNCING, '同步中……');
+            setCloudStatus(CLOUD_STATUS.SYNCING);
             try {
                 const res  = await fetch(API_PRESETS, {
                     headers: { 'Authorization': `Bearer ${state.idToken}` }
@@ -402,17 +389,17 @@
                 if (!res.ok) throw new Error(data.error);
                 state.presets = data.presets;
                 localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
-                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${state.currentUser.email}`);
+                setCloudStatus(CLOUD_STATUS.CONNECTED);
                 renderModalPresets();
             } catch (err) {
-                setCloudStatus(CLOUD_STATUS.ERROR, `讀取失敗：${err.message}`);
+                setCloudStatus(CLOUD_STATUS.ERROR);
             }
         }
 
         // ─── Vercel API：將預設清單寫入後台 ────────────────────────────────────
         async function savePresetsToAPI() {
             if (!state.currentUser || !state.idToken) return;
-            setCloudStatus(CLOUD_STATUS.SYNCING, '儲存中……');
+            setCloudStatus(CLOUD_STATUS.SYNCING);
             try {
                 // 確保 token 未過期
                 state.idToken = await state.currentUser.getIdToken();
@@ -426,9 +413,9 @@
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error);
-                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${state.currentUser.email}`);
+                setCloudStatus(CLOUD_STATUS.CONNECTED);
             } catch (err) {
-                setCloudStatus(CLOUD_STATUS.ERROR, `儲存失敗：${err.message}`);
+                setCloudStatus(CLOUD_STATUS.ERROR);
             }
         }
 
@@ -633,7 +620,7 @@
                 <div class="bg-slate-50 border border-slate-100 p-4 rounded-lg flex justify-between items-center hover:border-blue-300 transition-colors">
                     <div>
                         <div class="font-bold text-slate-700 text-xl">${p.name}</div>
-                        <div class="text-sm text-slate-400 font-mono mt-1">T:${p.top} B:${p.bottom} L:${p.left} R:${p.right} | H:${p.gapH}</div>
+                        <div class="text-sm text-slate-400 font-mono mt-1">上方:${p.top} 下方:${p.bottom} 左側:${p.left} 右側:${p.right} | 中間高度:${p.gapH}</div>
                     </div>
                     <div class="flex gap-2">
                         <button onclick="applyPreset(${idx})" class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
