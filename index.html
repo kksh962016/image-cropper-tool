@@ -18,7 +18,7 @@
         })();
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; color: #1e293b; overflow-x: hidden; font-size: 1.25rem; }
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #f1f5f9; }
@@ -210,65 +210,10 @@
         </div>
     </div>
 
-                <!-- Firebase 設定輸入 -->
-                <div class="space-y-3">
-                    <p class="font-bold text-slate-700">Firebase 專案設定</p>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="input-group-label">API Key</label>
-                            <input type="text" id="fbApiKey" placeholder="AIzaSy..." class="input-light w-full">
-                        </div>
-                        <div>
-                            <label class="input-group-label">Project ID</label>
-                            <input type="text" id="fbProjectId" placeholder="my-project-id" class="input-light w-full">
-                        </div>
-                        <div>
-                            <label class="input-group-label">Auth Domain</label>
-                            <input type="text" id="fbAuthDomain" placeholder="my-project.firebaseapp.com" class="input-light w-full">
-                        </div>
-                        <div>
-                            <label class="input-group-label">App ID</label>
-                            <input type="text" id="fbAppId" placeholder="1:123456:web:abc123" class="input-light w-full">
-                        </div>
-                    </div>
-                    <div>
-                        <label class="input-group-label text-rose-600">授權 Google 帳號（僅此帳號可登入使用雲端）</label>
-                        <input type="email" id="fbAllowedEmail" placeholder="your@gmail.com" class="input-light w-full border-rose-200 focus:border-rose-500">
-                    </div>
-                </div>
-
-                <!-- 資料儲存位置 -->
-                <div class="space-y-3">
-                    <p class="font-bold text-slate-700">資料儲存位置（自訂名稱）</p>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="input-group-label">Collection 名稱</label>
-                            <input type="text" id="fbCollection" placeholder="例：crop-presets" class="input-light w-full" oninput="updatePathPreview()">
-                        </div>
-                        <div>
-                            <label class="input-group-label">Document 名稱</label>
-                            <input type="text" id="fbDocument" placeholder="例：user-default" class="input-light w-full" oninput="updatePathPreview()">
-                        </div>
-                    </div>
-                    <p class="text-slate-400 text-lg">Firestore 路徑：<code id="fbPathPreview" class="bg-slate-100 px-2 py-1 rounded text-slate-500 font-mono">（請填入上方欄位）</code></p>
-                </div>
-
-                <!-- 連線狀態回饋 -->
-                <div id="cloudConnectStatus" class="hidden items-center gap-2 px-3 py-2 rounded-lg border text-xl"></div>
-            </div>
-            <div class="flex px-3 py-3 gap-3 flex-shrink-0" style="background-color:#1D4ED8;">
-                <button onclick="closeCloudModal()" class="text-xl flex-1 py-2 rounded bg-white hover:opacity-90 font-bold" style="color:#1D4ED8;">取消</button>
-                <button onclick="saveCloudConfig()" class="text-xl flex-1 py-2 rounded border border-white text-white hover:opacity-70 font-bold">儲存並連線</button>
-            </div>
-        </div>
-    </div>
-
     <script type="module">
         // ─── 常數 ───────────────────────────────────────────────────────────────
-        // 版權宣告年份常數，建立時確認，請勿隨意修改
-        const FOUNDED_YEAR = 2026;
-
         // Vercel API 端點（後台，Firebase config 完全不在前端）
+        const API_CONFIG  = '/api/config';
         const API_AUTH    = '/api/auth';
         const API_PRESETS = '/api/presets';
         const API_SAVE    = '/api/save';
@@ -277,14 +222,8 @@
         const FB_VER  = '10.12.2';
         const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
 
-        // Firebase 前端設定（僅供 Google 登入用，不含任何 Firestore 存取權）
-        // Firestore 讀寫完全由 Vercel 後台處理
-        const FB_CLIENT_CONFIG = {
-            apiKey:    'AIzaSyDb6CaltfgGLApZHSEwpH6HXctcIYlKhR0',
-            authDomain:'image-cropper-tool.firebaseapp.com',
-            projectId: 'image-cropper-tool',
-            appId:     '1:559607381985:web:120628651f644fffcc1ca0'
-        };
+        // Firebase 前端設定由後台 API 動態取得，前端不含任何設定值
+        let FB_CLIENT_CONFIG = null;
 
         // 雲端連線狀態常數
         const CLOUD_STATUS = {
@@ -307,7 +246,6 @@
             authProvider: null,
             currentUser: null,
             idToken: null,
-            cloudStatus: CLOUD_STATUS.DISCONNECTED
         };
 
         const els = {
@@ -356,8 +294,7 @@
         window.downloadResult      = downloadResult;
         window.closeConfirmModal   = closeConfirmModal;
         window.handleFile          = handleFile;
-        window.signOut             = signOut;
-
+        
         const mainCtx = els.mainCanvas.getContext('2d');
 
         // 動態計算頁尾高度，套用至主內容區塊的 padding-bottom，避免內容被遮蓋
@@ -369,7 +306,6 @@
 
         // ─── 雲端狀態指示燈 ────────────────────────────────────────────────────
         function setCloudStatus(status, message) {
-            state.cloudStatus = status;
             els.cloudStatusDot.className = `cloud-dot ${status}`;
             els.presetCloudDot.className = `cloud-dot ${status}`;
             els.presetCloudText.innerText = message || '';
@@ -378,15 +314,34 @@
             els.presetCloudStatus.classList.toggle('flex',    show);
         }
 
-        // ─── 雲端設定按鈕：未登入時觸發登入，已登入時顯示帳號資訊 ─────────────
+        // ─── 雲端設定按鈕：未登入時觸發登入，已登入時登出 ─────────────────────
         async function handleCloudBtn() {
-            if (state.currentUser) return; // 已登入時按鈕不做動作（可擴充為登出）
+            if (state.currentUser) {
+                if (window.signOut) window.signOut();
+                return;
+            }
             if (!state.auth) await initAuth();
-            if (window.doSignIn) window.doSignIn();
+            // 直接觸發登入，initAuth 內已設定 state.authProvider
+            if (state.auth && state.authProvider) {
+                const { signInWithPopup } = await import(`${FB_BASE}/firebase-auth.js`);
+                try {
+                    await signInWithPopup(state.auth, state.authProvider);
+                } catch (err) {
+                    if (err.code !== 'auth/popup-closed-by-user') {
+                        setCloudStatus(CLOUD_STATUS.ERROR, `登入失敗：${err.message}`);
+                    }
+                }
+            }
         }
 
         // ─── Firebase Auth 初始化（僅用於 Google 登入）────────────────────────
         async function initAuth() {
+            // 從後台取得 Firebase 前端設定，前端原始碼不含任何設定值
+            if (!FB_CLIENT_CONFIG) {
+                const res = await fetch(API_CONFIG);
+                FB_CLIENT_CONFIG = await res.json();
+            }
+
             const { initializeApp, getApps, getApp } = await import(`${FB_BASE}/firebase-app.js`);
             const { getAuth, GoogleAuthProvider, signInWithPopup,
                     onAuthStateChanged, signOut: fbSignOut } = await import(`${FB_BASE}/firebase-auth.js`);
@@ -415,7 +370,7 @@
                             els.cloudBtnText.innerText = '未登入';
                             return;
                         }
-                        // 驗證通過
+                        // 驗證通過，按鈕改顯示 email（點擊可登出）
                         state.currentUser = user;
                         els.cloudBtnText.innerText = user.email;
                         await loadPresetsFromAPI();
@@ -432,23 +387,8 @@
                 }
             });
 
-            // 觸發 Google 登入彈窗
-            async function doSignIn() {
-                try {
-                    await signInWithPopup(state.auth, state.authProvider);
-                } catch (err) {
-                    if (err.code !== 'auth/popup-closed-by-user') {
-                        setCloudStatus(CLOUD_STATUS.ERROR, `登入失敗：${err.message}`);
-                    }
-                }
-            }
-            window.doSignIn = doSignIn;
-
-            // 登出
-            window.signOut = async () => {
-                await fbSignOut(state.auth);
-                state.db = null;
-            };
+            // 登出（掛至 window 供 HTML onclick 呼叫）
+            window.signOut = async () => { await fbSignOut(state.auth); };
         }
 
         // ─── Vercel API：從後台讀取預設清單 ────────────────────────────────────
