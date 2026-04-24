@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖片裁減工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // 動態產生 SVG favicon 並注入至 <head>
+        (function () {
+            const svgFavicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="24" height="24" rx="6" fill="#2563EB"/><path d="M6 2v20"/><path d="M18 2v20"/><path d="M2 12h20"/><path d="M2 7h20"/><path d="M2 17h20"/></svg>`;
+            const encodedFavicon = 'data:image/svg+xml,' + encodeURIComponent(svgFavicon);
+            const link = document.createElement('link');
+            link.rel = 'icon';
+            link.type = 'image/svg+xml';
+            link.href = encodedFavicon;
+            document.head.appendChild(link);
+        })();
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; color: #1e293b; overflow-x: hidden; font-size: 1.25rem; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .canvas-container {
+            position: relative; display: inline-block;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,.1), 0 8px 10px -6px rgba(0,0,0,.1);
+            background-image: linear-gradient(45deg,#e2e8f0 25%,transparent 25%),linear-gradient(-45deg,#e2e8f0 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e2e8f0 75%),linear-gradient(-45deg,transparent 75%,#e2e8f0 75%);
+            background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0;
+            max-width: 100%; border: 1px solid #e2e8f0;
+        }
+        #mainCanvas { max-width: 100%; height: auto !important; display: block; }
+        #mid-gap-handle { position: absolute; border: 2px dashed #e11d48; background-color: rgba(225,29,72,.2); cursor: ns-resize; display: flex; align-items: center; justify-content: center; z-index: 10; pointer-events: auto; }
+        #mid-gap-handle:hover { background-color: rgba(225,29,72,.3); }
+        #mid-gap-handle::after { content: "✂ 移除區塊"; font-size: 1.25rem; font-weight: bold; color: white; background: #e11d48; padding: 4px 12px; border-radius: 8px; pointer-events: none; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,.2); }
+        .input-light { background: #fff; border: 1px solid #cbd5e1; color: #334155; border-radius: 8px; padding: 8px 12px; transition: all .2s; font-size: 1.25rem; }
+        .input-light:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+        .btn-action { transition: all .2s; display: inline-flex; align-items: center; gap: 12px; font-weight: 600; font-size: 1.25rem; }
+        .btn-action:active { transform: scale(.95); }
+        .input-group-label { font-size: 1.25rem; font-weight: 700; color: #64748b; margin-bottom: .5rem; display: block; white-space: nowrap; }
+        .drop-zone-active { border: 4px dashed #3b82f6 !important; background-color: #eff6ff !important; }
+        @keyframes fadeIn { from { opacity:0; transform:scale(.95); } to { opacity:1; transform:scale(1); } }
+        .animate-fade-in { animation: fadeIn .2s ease-out; }
+        /* 雲端狀態指示燈 */
+        .cloud-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+        .cloud-dot.connected    { background-color: #16a34a; }
+        .cloud-dot.disconnected { background-color: #94a3b8; }
+        .cloud-dot.error        { background-color: #dc2626; }
+        .cloud-dot.syncing      { background-color: #2563eb; animation: blink 1s infinite; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <main id="main-content" class="flex-grow w-[90%] mx-auto space-y-8">
+
+        <!-- 系統名稱與 LOGO 置中區塊 -->
+        <div class="flex flex-row items-center justify-center pt-6 gap-3">
+            <div class="bg-blue-600 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center" style="width:36px;height:36px;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v20"/><path d="M18 2v20"/><path d="M2 12h20"/><path d="M2 7h20"/><path d="M2 17h20"/></svg>
+            </div>
+            <h1 class="text-3xl font-bold text-slate-800 tracking-tight">圖片裁減工具</h1>
+        </div>
+
+        <!-- 合併卡片：裁切參數 + 預覽區域 -->
+        <section class="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col min-h-[600px]">
+
+            <!-- 裁切參數設定區 -->
+            <div class="px-8 py-4">
+                <div class="flex flex-wrap md:flex-nowrap items-end gap-6 w-full">
+                    <div class="flex flex-grow gap-6 w-full md:w-auto overflow-x-auto md:overflow-visible pb-2 md:pb-0">
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="input-group-label">裁掉上方 (px)</label>
+                            <input type="number" id="cutTop" value="0" min="0" oninput="updateParams()" class="input-light w-full">
+                        </div>
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="input-group-label">裁掉下方 (px)</label>
+                            <input type="number" id="cutBottom" value="0" min="0" oninput="updateParams()" class="input-light w-full">
+                        </div>
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="input-group-label">裁掉左側 (px)</label>
+                            <input type="number" id="cutLeft" value="0" min="0" oninput="updateParams()" class="input-light w-full">
+                        </div>
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="input-group-label">裁掉右側 (px)</label>
+                            <input type="number" id="cutRight" value="0" min="0" oninput="updateParams()" class="input-light w-full">
+                        </div>
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="input-group-label text-rose-600">中間移除高度 (px)</label>
+                            <input type="number" id="midGapHeight" value="0" min="0" oninput="updateParams()" class="input-light w-full border-rose-200 focus:border-rose-500">
+                        </div>
+                    </div>
+                    <!-- 按鈕群組 -->
+                    <div class="flex-shrink-0 flex gap-3">
+                        <button onclick="openPresetModal()" class="btn-action bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-xl border border-slate-200 h-[58px] whitespace-nowrap shadow-sm">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            常用設定
+                        </button>
+                        <button onclick="openCloudModal()" class="btn-action bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 px-6 rounded-xl border border-slate-200 h-[58px] whitespace-nowrap shadow-sm">
+                            <span id="cloudStatusDot" class="cloud-dot disconnected"></span>
+                            雲端設定
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="border-slate-200">
+
+            <!-- 資訊與控制列 -->
+            <div class="px-8 py-4 flex flex-wrap justify-between items-center gap-6">
+                <div class="flex items-center gap-6 text-xl">
+                    <div class="flex items-center">
+                        <span class="text-slate-600 font-bold uppercase tracking-widest">原始尺寸：</span>
+                        <span class="font-mono text-slate-600" id="infoRes">---</span>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="text-blue-600 font-bold uppercase tracking-widest">裁切後尺寸：</span>
+                        <span class="font-mono text-blue-600 font-bold" id="infoNewRes">---</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 w-auto">
+                    <button id="replaceImgBtn" onclick="triggerFileInput()" class="btn-action bg-white hover:bg-slate-50 text-slate-600 py-1 px-5 rounded-xl hidden border border-slate-200 shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        更換圖片
+                    </button>
+                    <button id="removeImgBtn" onclick="requestRemoveImage()" class="btn-action bg-white hover:bg-rose-50 text-rose-600 py-1 px-5 rounded-xl hidden border border-rose-200 shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                        移除圖片
+                    </button>
+                    <button id="downloadBtn" onclick="downloadResult()" class="btn-action bg-emerald-600 hover:bg-emerald-700 text-white py-1 px-6 rounded-xl hidden shadow-lg shadow-emerald-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        下載圖片
+                    </button>
+                </div>
+            </div>
+
+            <hr class="border-slate-200">
+
+            <!-- 上傳／編輯區 -->
+            <div id="dropZone" class="bg-slate-100 rounded-b-3xl flex-grow flex items-center justify-center p-6 overflow-hidden relative shadow-inner">
+                <input type="file" id="imageInput" accept="image/*" class="hidden" onchange="handleFile(event)">
+                <div id="canvasWrapper" class="canvas-container hidden">
+                    <canvas id="mainCanvas"></canvas>
+                    <div id="mid-gap-handle"></div>
+                </div>
+                <canvas id="resultCanvas" class="hidden"></canvas>
+                <div id="emptyState" onclick="triggerFileInput()" class="text-center space-y-6 cursor-pointer group hover:scale-105 transition-transform duration-300">
+                    <div class="inline-block p-16 rounded-[3rem] bg-white shadow-2xl border border-slate-100 text-slate-300 group-hover:border-blue-200 group-hover:text-blue-500 transition-all">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+                    </div>
+                    <div class="space-y-2">
+                        <p class="text-slate-600 font-bold text-2xl">點擊或將圖片拖曳至此</p>
+                        <p class="text-slate-400 text-xl">支援所有主流圖片格式</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 版權宣告頁尾：fixed 固定在視窗底部，py-3 控制高度 -->
+    <footer id="site-footer" class="fixed bottom-0 left-0 w-full py-3 border-t border-slate-200 bg-white text-center z-30">
+        <p class="text-xl font-normal text-slate-400">Copyright © 2026 杜佩珊. All Rights Reserved.</p>
+    </footer>
+
+    <!-- 自訂確認視窗（5-2 三段式，危險操作主題色 #DC2626） -->
+    <div id="confirmModal" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm hidden">
+        <div class="bg-white animate-fade-in overflow-hidden rounded-lg shadow-xl mx-auto" style="width:50vw;">
+            <div class="flex items-center justify-between px-3 py-3" style="background-color:#DC2626;">
+                <h3 id="confirmTitle" class="text-2xl font-bold text-white">確定要執行嗎？</h3>
+                <button onclick="closeConfirmModal()" class="text-xl text-white hover:opacity-70">✕</button>
+            </div>
+            <div class="p-3">
+                <p id="confirmMessage" class="text-xl font-normal">此操作將無法撤銷，請確認是否繼續。</p>
+            </div>
+            <div class="flex px-3 py-3 gap-3" style="background-color:#DC2626;">
+                <button onclick="closeConfirmModal()" class="text-xl flex-1 py-2 rounded bg-white hover:opacity-90 font-bold" style="color:#DC2626;">取消</button>
+                <button id="confirmActionBtn" class="text-xl flex-1 py-2 rounded border border-white text-white hover:opacity-70 font-bold">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 常用設定 Modal（5-2 三段式，一般操作主題色 #1D4ED8） -->
+    <div id="presetModal" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/50 backdrop-blur-sm hidden">
+        <div class="bg-white animate-fade-in overflow-hidden rounded-lg shadow-xl mx-auto flex flex-col" style="width:50vw;max-height:85vh;">
+            <div class="flex items-center justify-between px-3 py-3 flex-shrink-0" style="background-color:#1D4ED8;">
+                <h3 class="text-2xl font-bold text-white flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    常用裁剪預設
+                </h3>
+                <button onclick="closePresetModal()" class="text-xl text-white hover:opacity-70">✕</button>
+            </div>
+            <div class="p-3 overflow-y-auto flex-grow space-y-4">
+                <!-- 雲端同步狀態列（連線後顯示） -->
+                <div id="presetCloudStatus" class="hidden items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 text-xl text-slate-500">
+                    <span id="presetCloudDot" class="cloud-dot disconnected"></span>
+                    <span id="presetCloudText"></span>
+                </div>
+                <div class="flex gap-3">
+                    <input type="text" id="newPresetName" placeholder="設定預設名稱..." class="input-light flex-grow">
+                    <button onclick="saveCurrentAsPreset()" class="text-xl font-bold px-6 py-2 rounded text-white hover:opacity-90" style="background-color:#1D4ED8;">儲存</button>
+                </div>
+                <div id="modalPresetList" class="space-y-3"></div>
+            </div>
+            <div class="flex px-3 py-3 gap-3 flex-shrink-0" style="background-color:#1D4ED8;">
+                <button onclick="closePresetModal()" class="text-xl flex-1 py-2 rounded bg-white hover:opacity-90 font-bold" style="color:#1D4ED8;">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 雲端設定 Modal（5-2 三段式，一般操作主題色 #1D4ED8） -->
+    <div id="cloudModal" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/50 backdrop-blur-sm hidden">
+        <div class="bg-white animate-fade-in overflow-hidden rounded-lg shadow-xl mx-auto flex flex-col" style="width:50vw;max-height:90vh;">
+            <div class="flex items-center justify-between px-3 py-3 flex-shrink-0" style="background-color:#1D4ED8;">
+                <h3 class="text-2xl font-bold text-white flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                    Firestore 雲端設定
+                </h3>
+                <button onclick="closeCloudModal()" class="text-xl text-white hover:opacity-70">✕</button>
+            </div>
+            <div class="p-3 overflow-y-auto flex-grow space-y-4">
+
+                <!-- 操作說明 -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2 text-xl text-slate-600">
+                    <p class="font-bold text-blue-700">如何取得 Firebase 設定？</p>
+                    <ol class="list-decimal list-inside space-y-1 text-slate-500">
+                        <li>前往 <a href="https://console.firebase.google.com" target="_blank" class="text-blue-600 underline">console.firebase.google.com</a> 建立或選擇專案</li>
+                        <li>點選「新增應用程式」→ 選擇「Web（&lt;/&gt;）」圖示</li>
+                        <li>複製 <code class="bg-blue-100 px-1 rounded">firebaseConfig</code> 內的各項值填入下方</li>
+                        <li>前往「建構」→「Firestore Database」→ 建立資料庫</li>
+                        <li>在「規則」頁籤，測試階段可暫設：<code class="bg-blue-100 px-1 rounded">allow read, write: if true;</code></li>
+                    </ol>
+                </div>
+
+                <!-- Firebase 設定輸入 -->
+                <div class="space-y-3">
+                    <p class="font-bold text-slate-700">Firebase 專案設定</p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="input-group-label">API Key</label>
+                            <input type="text" id="fbApiKey" placeholder="AIzaSy..." class="input-light w-full">
+                        </div>
+                        <div>
+                            <label class="input-group-label">Project ID</label>
+                            <input type="text" id="fbProjectId" placeholder="my-project-id" class="input-light w-full">
+                        </div>
+                        <div>
+                            <label class="input-group-label">Auth Domain</label>
+                            <input type="text" id="fbAuthDomain" placeholder="my-project.firebaseapp.com" class="input-light w-full">
+                        </div>
+                        <div>
+                            <label class="input-group-label">App ID</label>
+                            <input type="text" id="fbAppId" placeholder="1:123456:web:abc123" class="input-light w-full">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 資料儲存位置 -->
+                <div class="space-y-3">
+                    <p class="font-bold text-slate-700">資料儲存位置（自訂名稱）</p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="input-group-label">Collection 名稱</label>
+                            <input type="text" id="fbCollection" placeholder="例：crop-presets" class="input-light w-full" oninput="updatePathPreview()">
+                        </div>
+                        <div>
+                            <label class="input-group-label">Document 名稱</label>
+                            <input type="text" id="fbDocument" placeholder="例：user-default" class="input-light w-full" oninput="updatePathPreview()">
+                        </div>
+                    </div>
+                    <p class="text-slate-400 text-lg">Firestore 路徑：<code id="fbPathPreview" class="bg-slate-100 px-2 py-1 rounded text-slate-500 font-mono">（請填入上方欄位）</code></p>
+                </div>
+
+                <!-- 連線狀態回饋 -->
+                <div id="cloudConnectStatus" class="hidden items-center gap-2 px-3 py-2 rounded-lg border text-xl"></div>
+            </div>
+            <div class="flex px-3 py-3 gap-3 flex-shrink-0" style="background-color:#1D4ED8;">
+                <button onclick="closeCloudModal()" class="text-xl flex-1 py-2 rounded bg-white hover:opacity-90 font-bold" style="color:#1D4ED8;">取消</button>
+                <button onclick="saveCloudConfig()" class="text-xl flex-1 py-2 rounded border border-white text-white hover:opacity-70 font-bold">儲存並連線</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // ─── Firebase SDK（ESM 模組，動態 import）─────────────────────────────
+        // 版本鎖定，確保相容性
+        const FB_VER = '10.12.2';
+        const FB_BASE = `https://www.gstatic.com/firebasejs/${FB_VER}`;
+
+        // 版權宣告年份常數，建立時確認，請勿隨意修改
+        const FOUNDED_YEAR = 2026;
+
+        // 雲端連線狀態常數
+        const CLOUD_STATUS = {
+            DISCONNECTED: 'disconnected',
+            CONNECTED:    'connected',
+            SYNCING:      'syncing',
+            ERROR:        'error'
+        };
+
+        const state = {
+            img: null,
+            isDragging: false,
+            startY: 0,
+            startMidY: 0,
+            midGapY: 0,
+            // localStorage 作為離線備援，Firestore 連線後同步覆蓋
+            presets: JSON.parse(localStorage.getItem('crop_presets_v3.4') || '[]'),
+            currentConfirmAction: null,
+            db: null,
+            fsConfig: null,
+            cloudStatus: CLOUD_STATUS.DISCONNECTED
+        };
+
+        const els = {
+            cutTop:        document.getElementById('cutTop'),
+            cutBottom:     document.getElementById('cutBottom'),
+            cutLeft:       document.getElementById('cutLeft'),
+            cutRight:      document.getElementById('cutRight'),
+            midGapHeight:  document.getElementById('midGapHeight'),
+            mainCanvas:    document.getElementById('mainCanvas'),
+            resultCanvas:  document.getElementById('resultCanvas'),
+            handle:        document.getElementById('mid-gap-handle'),
+            wrapper:       document.getElementById('canvasWrapper'),
+            empty:         document.getElementById('emptyState'),
+            resInfo:       document.getElementById('infoRes'),
+            newResInfo:    document.getElementById('infoNewRes'),
+            downloadBtn:   document.getElementById('downloadBtn'),
+            removeBtn:     document.getElementById('removeImgBtn'),
+            replaceBtn:    document.getElementById('replaceImgBtn'),
+            modal:         document.getElementById('presetModal'),
+            modalList:     document.getElementById('modalPresetList'),
+            fileInput:     document.getElementById('imageInput'),
+            dropZone:      document.getElementById('dropZone'),
+            confirmModal:  document.getElementById('confirmModal'),
+            confirmTitle:  document.getElementById('confirmTitle'),
+            confirmMsg:    document.getElementById('confirmMessage'),
+            confirmActionBtn: document.getElementById('confirmActionBtn'),
+            sitFooter:     document.getElementById('site-footer'),
+            mainContent:   document.getElementById('main-content'),
+            // 雲端設定相關
+            cloudModal:       document.getElementById('cloudModal'),
+            cloudStatusDot:   document.getElementById('cloudStatusDot'),
+            fbApiKey:         document.getElementById('fbApiKey'),
+            fbProjectId:      document.getElementById('fbProjectId'),
+            fbAuthDomain:     document.getElementById('fbAuthDomain'),
+            fbAppId:          document.getElementById('fbAppId'),
+            fbCollection:     document.getElementById('fbCollection'),
+            fbDocument:       document.getElementById('fbDocument'),
+            fbPathPreview:    document.getElementById('fbPathPreview'),
+            cloudConnectStatus: document.getElementById('cloudConnectStatus'),
+            presetCloudStatus:  document.getElementById('presetCloudStatus'),
+            presetCloudDot:     document.getElementById('presetCloudDot'),
+            presetCloudText:    document.getElementById('presetCloudText')
+        };
+
+        // window 掛載，讓 HTML inline onclick 可以呼叫
+        window.openPresetModal    = openPresetModal;
+        window.closePresetModal   = closePresetModal;
+        window.saveCurrentAsPreset = saveCurrentAsPreset;
+        window.applyPreset        = applyPreset;
+        window.requestDeletePreset = requestDeletePreset;
+        window.openCloudModal     = openCloudModal;
+        window.closeCloudModal    = closeCloudModal;
+        window.saveCloudConfig    = saveCloudConfig;
+        window.updatePathPreview  = updatePathPreview;
+        window.triggerFileInput   = triggerFileInput;
+        window.updateParams       = updateParams;
+        window.requestRemoveImage = requestRemoveImage;
+        window.downloadResult     = downloadResult;
+        window.closeConfirmModal  = closeConfirmModal;
+        window.handleFile         = handleFile;
+
+        const mainCtx = els.mainCanvas.getContext('2d');
+
+        // 動態計算頁尾高度，套用至主內容區塊的 padding-bottom，避免內容被遮蓋
+        function adjustMainPadding() {
+            els.mainContent.style.paddingBottom = els.sitFooter.offsetHeight + 'px';
+        }
+        adjustMainPadding();
+        window.addEventListener('resize', adjustMainPadding);
+
+        // ─── 雲端狀態指示燈 ────────────────────────────────────────────────────
+        function setCloudStatus(status, message) {
+            state.cloudStatus = status;
+            els.cloudStatusDot.className = `cloud-dot ${status}`;
+            els.presetCloudDot.className = `cloud-dot ${status}`;
+            els.presetCloudText.innerText = message || '';
+            const show = status !== CLOUD_STATUS.DISCONNECTED;
+            els.presetCloudStatus.classList.toggle('hidden', !show);
+            els.presetCloudStatus.classList.toggle('flex',    show);
+        }
+
+        // ─── 雲端設定 Modal ─────────────────────────────────────────────────────
+        function openCloudModal() {
+            const saved = JSON.parse(localStorage.getItem('fb_config') || '{}');
+            els.fbApiKey.value     = saved.apiKey     || '';
+            els.fbProjectId.value  = saved.projectId  || '';
+            els.fbAuthDomain.value = saved.authDomain  || '';
+            els.fbAppId.value      = saved.appId       || '';
+            els.fbCollection.value = saved.collection  || '';
+            els.fbDocument.value   = saved.document    || '';
+            updatePathPreview();
+            els.cloudConnectStatus.classList.add('hidden');
+            els.cloudModal.classList.remove('hidden');
+        }
+
+        function closeCloudModal() {
+            els.cloudModal.classList.add('hidden');
+        }
+
+        // 即時更新 Firestore 路徑預覽
+        function updatePathPreview() {
+            const col = els.fbCollection.value.trim() || '（Collection）';
+            const doc = els.fbDocument.value.trim()   || '（Document）';
+            els.fbPathPreview.innerText = `${col} / ${doc}`;
+        }
+
+        // 顯示 Modal 內的連線狀態回饋
+        function showConnectStatus(status, message) {
+            const map = {
+                [CLOUD_STATUS.CONNECTED]: 'border-green-200 bg-green-50 text-green-700',
+                [CLOUD_STATUS.ERROR]:     'border-red-200   bg-red-50   text-red-700',
+                [CLOUD_STATUS.SYNCING]:   'border-blue-200  bg-blue-50  text-blue-700'
+            };
+            const cls = map[status] || 'border-slate-200 bg-slate-50 text-slate-600';
+            els.cloudConnectStatus.className = `flex items-center gap-2 px-3 py-2 rounded-lg border text-xl ${cls}`;
+            els.cloudConnectStatus.innerHTML =
+                `<span class="cloud-dot ${status}"></span><span>${message}</span>`;
+            els.cloudConnectStatus.classList.remove('hidden');
+        }
+
+        // 儲存設定並初始化 Firestore 連線
+        async function saveCloudConfig() {
+            const config = {
+                apiKey:     els.fbApiKey.value.trim(),
+                projectId:  els.fbProjectId.value.trim(),
+                authDomain: els.fbAuthDomain.value.trim(),
+                appId:      els.fbAppId.value.trim(),
+                collection: els.fbCollection.value.trim(),
+                document:   els.fbDocument.value.trim()
+            };
+            if (!config.apiKey || !config.projectId || !config.collection || !config.document) {
+                showConnectStatus(CLOUD_STATUS.ERROR, '請填寫 API Key、Project ID、Collection 及 Document 名稱');
+                return;
+            }
+            showConnectStatus(CLOUD_STATUS.SYNCING, '連線中……');
+            localStorage.setItem('fb_config', JSON.stringify(config));
+            try {
+                await initFirestore(config);
+                showConnectStatus(CLOUD_STATUS.CONNECTED, '連線成功！預設資料已從 Firestore 同步');
+            } catch (err) {
+                showConnectStatus(CLOUD_STATUS.ERROR, `連線失敗：${err.message}`);
+                setCloudStatus(CLOUD_STATUS.ERROR, '連線失敗');
+            }
+        }
+
+        // 動態載入 Firebase SDK 並初始化 Firestore
+        async function initFirestore(config) {
+            const { initializeApp, getApps, getApp } = await import(`${FB_BASE}/firebase-app.js`);
+            const { getFirestore }                    = await import(`${FB_BASE}/firebase-firestore.js`);
+
+            // 避免重複初始化 Firebase App
+            const app = getApps().length ? getApp() : initializeApp({
+                apiKey:     config.apiKey,
+                authDomain: config.authDomain,
+                projectId:  config.projectId,
+                appId:      config.appId
+            });
+            state.db       = getFirestore(app);
+            state.fsConfig = config;
+            await loadPresetsFromFirestore();
+        }
+
+        // 從 Firestore 讀取預設清單
+        async function loadPresetsFromFirestore() {
+            const { doc, getDoc } = await import(`${FB_BASE}/firebase-firestore.js`);
+            const cfg = state.fsConfig;
+            setCloudStatus(CLOUD_STATUS.SYNCING, '同步中……');
+            try {
+                const snap = await getDoc(doc(state.db, cfg.collection, cfg.document));
+                if (snap.exists()) {
+                    state.presets = snap.data().presets || [];
+                    localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
+                } else {
+                    // 文件不存在，將本地資料上傳至 Firestore
+                    await savePresetsToFirestore();
+                }
+                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${cfg.collection} / ${cfg.document}`);
+                renderModalPresets();
+            } catch (err) {
+                setCloudStatus(CLOUD_STATUS.ERROR, `讀取失敗：${err.message}`);
+                throw err;
+            }
+        }
+
+        // 將預設清單寫入 Firestore
+        async function savePresetsToFirestore() {
+            if (!state.db || !state.fsConfig) return;
+            const { doc, setDoc } = await import(`${FB_BASE}/firebase-firestore.js`);
+            const cfg = state.fsConfig;
+            setCloudStatus(CLOUD_STATUS.SYNCING, '儲存中……');
+            try {
+                await setDoc(doc(state.db, cfg.collection, cfg.document), { presets: state.presets });
+                setCloudStatus(CLOUD_STATUS.CONNECTED, `已連線：${cfg.collection} / ${cfg.document}`);
+            } catch (err) {
+                setCloudStatus(CLOUD_STATUS.ERROR, `寫入失敗：${err.message}`);
+            }
+        }
+
+        // 頁面載入時，若有已儲存的 Firebase 設定則自動重新連線
+        window.addEventListener('load', async () => {
+            const saved = JSON.parse(localStorage.getItem('fb_config') || '{}');
+            if (saved.apiKey && saved.projectId && saved.collection && saved.document) {
+                try { await initFirestore(saved); } catch (_) { /* 靜默降級使用 localStorage */ }
+            }
+        });
+
+        // ─── 自訂確認視窗邏輯 ───────────────────────────────────────────────────
+        function showConfirm({ title, message, onConfirm }) {
+            els.confirmTitle.innerText = title;
+            els.confirmMsg.innerText   = message;
+            state.currentConfirmAction = onConfirm;
+            els.confirmModal.classList.remove('hidden');
+        }
+
+        function closeConfirmModal() {
+            els.confirmModal.classList.add('hidden');
+            state.currentConfirmAction = null;
+        }
+
+        els.confirmActionBtn.addEventListener('click', () => {
+            if (state.currentConfirmAction) state.currentConfirmAction();
+            closeConfirmModal();
+        });
+
+        // ─── 檔案處理 ──────────────────────────────────────────────────────────
+        els.dropZone.addEventListener('dragover',  (e) => { e.preventDefault(); els.dropZone.classList.add('drop-zone-active'); });
+        els.dropZone.addEventListener('dragleave', ()  => { els.dropZone.classList.remove('drop-zone-active'); });
+        els.dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            els.dropZone.classList.remove('drop-zone-active');
+            if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFile(e) { if (e.target.files[0]) processFile(e.target.files[0]); }
+
+        function processFile(file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    state.img = img;
+                    els.mainCanvas.width  = img.width;
+                    els.mainCanvas.height = img.height;
+                    state.midGapY = img.height / 2;
+                    resetInputs();
+                    els.wrapper.classList.remove('hidden');
+                    els.empty.classList.add('hidden');
+                    els.removeBtn.classList.remove('hidden');
+                    els.downloadBtn.classList.remove('hidden');
+                    els.replaceBtn.classList.remove('hidden');
+                    updateParams();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function resetInputs() {
+            els.cutTop.value = els.cutBottom.value = els.cutLeft.value = els.cutRight.value = els.midGapHeight.value = 0;
+        }
+
+        function getScale() {
+            if (!state.img) return 1;
+            return state.img.width / els.mainCanvas.clientWidth;
+        }
+
+        function updateParams() {
+            if (!state.img) return;
+            const top    = parseInt(els.cutTop.value)       || 0;
+            const bottom = parseInt(els.cutBottom.value)    || 0;
+            const left   = parseInt(els.cutLeft.value)      || 0;
+            const right  = parseInt(els.cutRight.value)     || 0;
+            const gapH   = parseInt(els.midGapHeight.value) || 0;
+
+            state.midGapY = Math.max(top, Math.min(state.midGapY, state.img.height - bottom - gapH));
+
+            mainCtx.clearRect(0, 0, els.mainCanvas.width, els.mainCanvas.height);
+            mainCtx.drawImage(state.img, 0, 0);
+
+            // 繪製裁切遮罩（上下左右）
+            mainCtx.fillStyle = 'rgba(0,0,0,0.45)';
+            mainCtx.fillRect(0, 0, els.mainCanvas.width, top);
+            mainCtx.fillRect(0, els.mainCanvas.height - bottom, els.mainCanvas.width, bottom);
+            mainCtx.fillRect(0, top, left, els.mainCanvas.height - top - bottom);
+            mainCtx.fillRect(els.mainCanvas.width - right, top, right, els.mainCanvas.height - top - bottom);
+
+            // 繪製中間移除區塊遮罩
+            mainCtx.fillStyle = 'rgba(225,29,72,0.5)';
+            mainCtx.fillRect(left, state.midGapY, state.img.width - left - right, gapH);
+
+            const scale = getScale();
+            els.handle.style.top    = `${state.midGapY / scale}px`;
+            els.handle.style.left   = `${left / scale}px`;
+            els.handle.style.width  = `${(els.mainCanvas.width - left - right) / scale}px`;
+            els.handle.style.height = `${gapH / scale}px`;
+            els.handle.style.display = gapH > 0 ? 'flex' : 'none';
+
+            els.resInfo.innerText    = `${state.img.width} × ${state.img.height} px`;
+            els.newResInfo.innerText = `${Math.max(0, state.img.width - left - right)} × ${Math.max(0, state.img.height - top - bottom - gapH)} px`;
+        }
+
+        function requestRemoveImage() {
+            showConfirm({ title: '移除目前圖片', message: '您確定要移除目前的圖片嗎？這將會清除所有目前的裁切進度。', onConfirm: removeImage });
+        }
+
+        function removeImage() {
+            state.img = null;
+            els.fileInput.value = '';
+            els.wrapper.classList.add('hidden');
+            els.empty.classList.remove('hidden');
+            els.removeBtn.classList.add('hidden');
+            els.downloadBtn.classList.add('hidden');
+            els.replaceBtn.classList.add('hidden');
+            els.resInfo.innerText    = '---';
+            els.newResInfo.innerText = '---';
+            mainCtx.clearRect(0, 0, els.mainCanvas.width, els.mainCanvas.height);
+            resetInputs();
+        }
+
+        const resizeObserver = new ResizeObserver(() => { if (state.img) updateParams(); });
+        resizeObserver.observe(document.body);
+
+        // ─── 中間移除區塊拖曳邏輯 ──────────────────────────────────────────────
+        els.handle.addEventListener('mousedown', (e) => {
+            if (!state.img) return;
+            state.isDragging = true;
+            state.startY     = e.clientY;
+            state.startMidY  = state.midGapY;
+            document.body.style.cursor = 'ns-resize';
+            e.preventDefault();
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!state.isDragging || !state.img) return;
+            state.midGapY = state.startMidY + (e.clientY - state.startY) * getScale();
+            updateParams();
+        });
+
+        window.addEventListener('mouseup', () => {
+            state.isDragging = false;
+            document.body.style.cursor = 'default';
+        });
+
+        // 產生裁切後的 Canvas
+        function generateCroppedCanvas() {
+            const top    = parseInt(els.cutTop.value)       || 0;
+            const bottom = parseInt(els.cutBottom.value)    || 0;
+            const left   = parseInt(els.cutLeft.value)      || 0;
+            const right  = parseInt(els.cutRight.value)     || 0;
+            const gapH   = parseInt(els.midGapHeight.value) || 0;
+            const w = state.img.width  - left - right;
+            const h = state.img.height - top  - bottom - gapH;
+
+            els.resultCanvas.width  = Math.max(1, w);
+            els.resultCanvas.height = Math.max(1, h);
+            const rCtx = els.resultCanvas.getContext('2d');
+
+            // 繪製上半部
+            const upperH = state.midGapY - top;
+            if (upperH > 0) rCtx.drawImage(state.img, left, top, w, upperH, 0, 0, w, upperH);
+
+            // 繪製下半部（跳過移除區塊）
+            const lowerSrcY = state.midGapY + gapH;
+            const lowerH    = state.img.height - bottom - lowerSrcY;
+            if (lowerH > 0) rCtx.drawImage(state.img, left, lowerSrcY, w, lowerH, 0, Math.max(0, upperH), w, lowerH);
+        }
+
+        function downloadResult() {
+            if (!state.img) return;
+            generateCroppedCanvas();
+            const link = document.createElement('a');
+            link.download = 'cropped_image.png';
+            link.href = els.resultCanvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // ─── 常用預設管理 ──────────────────────────────────────────────────────
+        function openPresetModal()  { renderModalPresets(); els.modal.classList.remove('hidden'); }
+        function closePresetModal() { els.modal.classList.add('hidden'); }
+
+        async function saveCurrentAsPreset() {
+            const nameInput = document.getElementById('newPresetName');
+            const name = nameInput.value.trim() || `預設 ${state.presets.length + 1}`;
+            state.presets.push({
+                name,
+                top:    els.cutTop.value,
+                bottom: els.cutBottom.value,
+                left:   els.cutLeft.value,
+                right:  els.cutRight.value,
+                gapH:   els.midGapHeight.value,
+                midY:   state.midGapY
+            });
+            // 同步寫入 localStorage（離線備援）與 Firestore（若已連線）
+            localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
+            await savePresetsToFirestore();
+            nameInput.value = '';
+            renderModalPresets();
+        }
+
+        function renderModalPresets() {
+            els.modalList.innerHTML = state.presets.map((p, idx) => `
+                <div class="bg-slate-50 border border-slate-100 p-4 rounded-lg flex justify-between items-center hover:border-blue-300 transition-colors">
+                    <div>
+                        <div class="font-bold text-slate-700 text-xl">${p.name}</div>
+                        <div class="text-sm text-slate-400 font-mono mt-1">T:${p.top} B:${p.bottom} L:${p.left} R:${p.right} | H:${p.gapH}</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="applyPreset(${idx})" class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        </button>
+                        <button onclick="requestDeletePreset(${idx})" class="p-2 text-slate-400 hover:text-rose-500 rounded-lg transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                        </button>
+                    </div>
+                </div>
+            `).join('') || '<div class="text-slate-400 italic text-center py-6 text-xl">尚未儲存任何預設設定</div>';
+        }
+
+        function applyPreset(idx) {
+            const p = state.presets[idx];
+            els.cutTop.value       = p.top;
+            els.cutBottom.value    = p.bottom;
+            els.cutLeft.value      = p.left;
+            els.cutRight.value     = p.right;
+            els.midGapHeight.value = p.gapH;
+            if (state.img) { state.midGapY = p.midY; updateParams(); }
+            closePresetModal();
+        }
+
+        function requestDeletePreset(idx) {
+            showConfirm({
+                title:   '刪除預設設定',
+                message: `確定要刪除「${state.presets[idx].name}」嗎？此動作無法復原。`,
+                onConfirm: () => deletePreset(idx)
+            });
+        }
+
+        async function deletePreset(idx) {
+            state.presets.splice(idx, 1);
+            // 同步寫入 localStorage（離線備援）與 Firestore（若已連線）
+            localStorage.setItem('crop_presets_v3.4', JSON.stringify(state.presets));
+            await savePresetsToFirestore();
+            renderModalPresets();
+        }
+
+        function triggerFileInput() { els.fileInput.click(); }
+    </script>
+</body>
+</html>
